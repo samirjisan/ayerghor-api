@@ -1,25 +1,27 @@
 <?php
 
-use App\Http\Controllers\Api\Admin\DashboardController;
+use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\Admin\CouponController as AdminCouponController;
+use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\OrderManagementController;
 use App\Http\Controllers\Api\Admin\ProductApprovalController;
 use App\Http\Controllers\Api\Admin\ProductController as AdminProductController;
-use App\Http\Controllers\Api\Admin\WithdrawalManagementController;
 use App\Http\Controllers\Api\Admin\StoreSettingsController;
+use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\Admin\WithdrawalManagementController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CouponController;
-use App\Http\Controllers\Api\StorefrontController;
-use App\Http\Controllers\Api\Customer\DashboardController as CustomerDashboardController;
 use App\Http\Controllers\Api\Customer\CartController;
-use App\Http\Controllers\Api\Customer\OrderController;
+use App\Http\Controllers\Api\Customer\DashboardController as CustomerDashboardController;
 use App\Http\Controllers\Api\Customer\MarketingAccountController;
-use App\Http\Controllers\Api\Customer\SellerProductController;
+use App\Http\Controllers\Api\Customer\OrderController;
 use App\Http\Controllers\Api\Customer\SalesFeedbackController;
+use App\Http\Controllers\Api\Customer\SellerProductController;
 use App\Http\Controllers\Api\Customer\WithdrawalController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\StorefrontController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -68,6 +70,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:super_admin')->prefix('admin')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index']);
+        Route::get('/users', [AdminUserController::class, 'index']);
+        Route::put('/users/{user}', [AdminUserController::class, 'update']);
+        Route::patch('/users/{user}/status', [AdminUserController::class, 'updateStatus']);
+        Route::apiResource('categories', AdminCategoryController::class)->except(['show']);
         Route::get('/orders', [OrderManagementController::class, 'index']);
         Route::patch('/orders/{order}/status', [OrderManagementController::class, 'updateStatus']);
         Route::get('/withdrawals', [WithdrawalManagementController::class, 'index']);
