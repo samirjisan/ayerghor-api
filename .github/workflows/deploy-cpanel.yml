@@ -1,0 +1,105 @@
+name: API CI and cPanel deployment
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run test suite
+        run: php artisan test --compact
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && vars.CPANEL_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CPANEL_HOST: alpha.hostseba.com
+      CPANEL_PORT: '22'
+      CPANEL_USER: ayerghor
+      API_DEPLOY_PATH: /home/ayerghor/laravel-api
+      CPANEL_SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_PRIVATE_KEY }}
+      CPANEL_KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
+      CPANEL_PHP_COMMAND: ${{ secrets.CPANEL_PHP_COMMAND }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CPANEL_SSH_PRIVATE_KEY CPANEL_KNOWN_HOSTS CPANEL_PHP_COMMAND; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::The $name Actions secret is required for cPanel deployment."
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$CPANEL_SSH_PRIVATE_KEY" > "$HOME/.ssh/cpanel_deploy"
+          printf '%s\n' "$CPANEL_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/cpanel_deploy" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/cpanel_deploy" > /dev/null
+
+      - name: Upload Laravel application
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-p "$CPANEL_PORT" -i "$HOME/.ssh/cpanel_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+          ssh "${ssh_options[@]}" "$CPANEL_USER@$CPANEL_HOST" "mkdir -p '$API_DEPLOY_PATH'"
+          rsync -az \
+            -e "ssh -p $CPANEL_PORT -i $HOME/.ssh/cpanel_deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='vendor/' \
+            --exclude='storage/' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            ./ "$CPANEL_USER@$CPANEL_HOST:$API_DEPLOY_PATH/"
+
+      - name: Install production dependencies and migrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-p "$CPANEL_PORT" -i "$HOME/.ssh/cpanel_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+          ssh "${ssh_options[@]}" "$CPANEL_USER@$CPANEL_HOST" \
+            "DEPLOY_PATH='$API_DEPLOY_PATH' PHP_COMMAND='$CPANEL_PHP_COMMAND' bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          test -f .env
+          test -f public/index.php
+          composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+          "$PHP_COMMAND" artisan migrate --force
+          "$PHP_COMMAND" artisan optimize:clear
+          "$PHP_COMMAND" artisan optimize
+          REMOTE
